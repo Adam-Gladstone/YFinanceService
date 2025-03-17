@@ -1,0 +1,102 @@
+References:
+Python Project Setup (ideal): https://realpython.com/python-pyproject-toml/
+Flask: https://medium.com/@asvinjangid.kumar/creating-your-own-api-in-python-a-beginners-guide-59f4dd18d301
+
+
+Alternative approaches
+----------------------
+PowerBI supports enabling Python (using a local install, so we can import yfinance - this is unlike using Excel's =PY(...) function that does not allow importing yfinance). PowerBI supports running a script which returns a data frame 
+(https://learn.microsoft.com/en-us/power-bi/connect-data/desktop-python-scripts)
+We got this to work using the script (D:\Development\Projects\Python\FinancialData\src\equity_financials_alt.py) without any significant modification. 
+
+Then you can use the visualisations (tables, graphs etc) to show the output:
+https://learn.microsoft.com/en-us/power-bi/connect-data/desktop-python-visuals
+
+NOTE: this is slightly bizarre: from the data frame that is 'imported' (i.e. produced by running the original python script) an additional script is injected to extract the required data into a 'dataset' and from that dataset to use matplotlib to produce the visual.
+
+This article explains setup and usage in depth: https://realpython.com/power-bi-python/
+
+Power Query (Python)
+Go to Home, Transform Data to see the Power Query M source:
+
+let
+    Source = Python.Execute("import pandas as pd#(lf)import yfinance as yf#(lf)#(lf)#(lf)def get_value(info: dict, key: str) -> float:#(lf)    """"""Retrieve a value from the dictionary or 0 if it doesn't exist""""""#(lf)    if key in info.keys():#(lf)        return info[key]#(lf)    return float(0.0)#(lf)#(lf)#(lf)def get_key_indicators(ticker: str) -> list:#(lf)    """"""Retrieve key indicators for ticker""""""#(lf)#(lf)    tk: dict = yf.Ticker(ticker)#(lf)    info: dict = tk.info#(lf)#(lf)    # with open('./Ticker Info 31-10-2024.txt', 'w') as f:#(lf)    #     print(info, file=f)#(lf)#(lf)    indicators: list = [#(lf)        ticker,#(lf)        get_value(info, ""trailingPE""),#(lf)        get_value(info, ""forwardPE""),#(lf)        get_value(info, ""earningsGrowth""),#(lf)        get_value(info, ""trailingPegRatio""),#(lf)        get_value(info, ""marketCap""),#(lf)        get_value(info, ""exDividendDate""),#(lf)    ]#(lf)#(lf)    return indicators#(lf)#(lf)#(lf)def get_all_indicators(tickers: list) -> pd.DataFrame:#(lf)    """"""Retrieve all indicators as a data frame""""""#(lf)#(lf)    rows: list = []#(lf)    headers: list = [#(lf)        ""ticker"",#(lf)        ""trailingPE"",#(lf)        ""forwardPE"",#(lf)        ""earningsGrowth"",#(lf)        ""trailingPegRatio"",#(lf)        ""marketCap"",#(lf)        ""exDividendDate"",#(lf)    ]#(lf)#(lf)    for ticker in tickers:#(lf)        rows.append(get_key_indicators(ticker))#(lf)#(lf)    df = pd.DataFrame(rows, columns=headers)#(lf)    return df#(lf)#(lf)#(lf)tickers = ['SAN.MC', 'BBVA.MC', 'REP.MC', 'MAP.MC', 'AENA.MC']#(lf)df = get_all_indicators(tickers)#(lf)print(df)#(lf)"),
+    df1 = Source{[Name="df"]}[Value]
+in
+    df1
+
+Plugging this into Excel: "Expression.Error: The name 'Python.Execute' wasn't recognized.  Make sure it's spelled correctly."
+
+-------------------------------------------------------
+Use a custom PowerQuery connector
+---------------------------------
+In PowerBI create a blank query:
+Source = YFinanceData.Feed("http://localhost:5000/YFinanceService?ticker=BBVA.MC")
+Then use this to retrieve the specific information and once inside the PowerQuery editor that data can be massaged as required.
+
+Excel does not seem to support using a custom Power Query connector - or at least it does not appear in a list like with PowerBI. Therefore, in Excel, use Get Data, From Web connector (not the OData) and set address as 	http://localhost:5000/YFinanceService?ticker=SAN.MC
+This retrieves a dictionary and any list elements can be extracted and expanded.
+
+let
+    Source = Json.Document(Web.Contents("http://localhost:5000/YFinanceService?ticker=SAN.MC"))
+in
+    Source
+
+This works and we should be able to parameterise it.
+
+What this means is that the custom Power Query connector (YFinanceData connector) is unnecessary. We just need a YFinanceService running a RESTFul API.
+
+RESTFul service design
+----------------------
+There are two objectives:
+1. Perform a stock valuation using Graham's formula (or similar).
+2. Retrieve specific data items for a specific ticker.
+
+Objective: Calculate intrinsic value of a stock using Graham's formula in Python
+https://medium.com/@akjha22/estimate-intrinsic-value-of-companys-stock-using-python-algorithmic-trading-ii-a0875dc3311f
+
+The calculation is done in Python using yfinance
+The result is served up over a Flask endpoint
+The data is used in Excel
+The query takes parameters from an Excel table and invokes the 'function' via Power Query Web Connector
+
+Split the YFinanceService into 
+	FlaskApp		- defines the routes, manages obtaining parameters, etc
+	YFinanceInterop	- acquire data from yfinance and munge it into a form we use or perform an additional calculation
+
+
+On Web Scraping (with yahoo_fin)
+https://peter-lo.com/Teaching/AMA-Python2/Lecture4.pdf
+
+On YahooFinance
+https://algotrading101.com/learn/yahoo-finance-api-guide/
+
+On Graham and Graham's formula
+https://www.grahamvalue.com/article/understanding-benjamin-graham-formula-correctly
+https://www8.gsb.columbia.edu/sites/valueinvesting/files/files/Buffett1984.pdf
+
+***** https://stablebread.com/how-to-calculate-the-intrinsic-value-of-a-company-like-benjamin-graham/
+
+V = (EPS * (8.5 + 2g) * 4.4) / Y
+
+where:
+V = intrinsic value per share (over the next 7-10 years)
+	EPS = earnings per share (over the trailing twelve months (TTM))
+	8.5 = price-to-earnings (P/E) base for a no-growth company
+	g = reasonably expected annual growth rate (over the next 7-10 years)
+	4.4 = average yield of AAA Corporate Bonds
+	Y = current yield of AAA Corporate Bonds
+
+Obtain:
+	TTM EPS: yfinance ticker.info['trailingEps']
+	g: PEG Ratio (5yr expected)
+	
+Inputs
+	Stock ticker
+	Average yield of AAA Corporate Bonds
+	Y = current yield of AAA Corporate Bonds
+
+Outputs: V intrinsic value per share
+
+Flask
+https://readthedocs.org/projects/flask-restful/downloads/pdf/latest/
