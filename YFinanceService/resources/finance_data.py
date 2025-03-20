@@ -147,13 +147,13 @@ class IntrinsicValue(Resource):
             "avg_yield",
             type=float,
             required=True,
-            help="Average yield of AAA Corporate Bonds",
+            help="Average yield of AAA Corporate Bonds"
         )
         parser.add_argument(
             "cur_yield",
             type=float,
             required=True,
-            help="Current yield of AAA Corporate Bonds",
+            help="Current yield of AAA Corporate Bonds"
         )
 
         args = parser.parse_args()
